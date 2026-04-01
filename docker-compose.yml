@@ -246,6 +246,7 @@ services:
       - ./step1_basics:/app/step1_basics
       - ./step2_pipeline:/app/step2_pipeline
       - ./step3_streaming:/app/step3_streaming
+      - ./step4_avro_test:/app/step4_avro_test
     entrypoint: /bin/bash
     tty: true
     stdin_open: true

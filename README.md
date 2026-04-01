@@ -1,5 +1,22 @@
 # Confluent Platform 실습 프로젝트
 
+## 목차
+
+- [Confluent Platform이란?](#confluent-platform이란)
+- [아키텍처](#아키텍처)
+- [사전 준비](#사전-준비)
+- [빠른 시작](#빠른-시작)
+- [실행 방법: 로컬 vs Docker](#실행-방법-로컬-vs-docker)
+- [Step 1: 이벤트 스트리밍 기초](#step-1-이벤트-스트리밍-기초) — Producer, Consumer, Consumer Group, Partition, Offset
+- [Step 2: 실시간 데이터 파이프라인 (CDC)](#step-2-실시간-데이터-파이프라인-cdc) — Kafka Connect, Debezium, Change Data Capture
+- [Step 3: 스트림 프로세싱 (ksqlDB)](#step-3-스트림-프로세싱-ksqldb) — SQL 기반 실시간 집계/필터링
+- [Step 4: Avro → JSON 변환 (QRadar 연동 검증)](#step-4-avro--json-변환-qradar-연동-검증) — 바이너리 → 텍스트 포맷 변환
+- [프로젝트 구조](#프로젝트-구조)
+- [포트 정리](#포트-정리)
+- [종료](#종료)
+
+---
+
 ## Confluent Platform이란?
 
 **Apache Kafka**는 대규모 실시간 데이터 스트리밍을 위한 분산 메시징 시스템입니다. **Confluent Platform**은 Kafka를 중심으로 실무에 필요한 도구들을 묶은 통합 플랫폼입니다.
@@ -394,6 +411,93 @@ EMIT CHANGES;
 
 ---
 
+## Step 4: Avro → JSON 변환 (QRadar 연동 검증)
+
+> Confluent 실무 환경에서 주로 사용하는 **Avro 바이너리 포맷**을, QRadar 같은 텍스트 전용 시스템이 읽을 수 있도록 **JSON으로 변환**하는 파이프라인을 검증합니다.
+
+### 배경
+
+| 항목 | Avro | JSON |
+|------|------|------|
+| 포맷 | 바이너리 (사람이 읽을 수 없음) | 텍스트 (사람이 읽을 수 있음) |
+| 장점 | 컴팩트, 빠름, 스키마 호환성 검증 | 범용 호환, 디버깅 용이 |
+| 실무 사용률 | 높음 (플랫폼팀 가이드 권장) | 낮음 (개발/테스트 용도) |
+| QRadar 수집 | 불가 (바이너리 파싱 불가) | 가능 |
+
+실무에서는 성능과 스키마 관리 이점 때문에 Avro를 사용하는 경우가 대부분입니다. QRadar처럼 텍스트만 수신 가능한 시스템과 연동하려면 **Avro → JSON 변환 토픽**을 생성해야 합니다.
+
+### 실행
+
+```bash
+# 4-1. Avro Producer 실행 (10초 정도 돌린 후 Ctrl+C로 토픽 생성)
+docker exec -it python-app python step4_avro_test/01_avro_producer.py
+
+# 4-2. ksqlDB로 Avro → JSON 변환 파이프라인 생성
+docker exec -it python-app python step4_avro_test/02_avro_to_json_ksqldb.py
+
+# 4-3. Avro Producer 다시 실행 (별도 터미널, 변환 데이터 생성)
+docker exec -it python-app python step4_avro_test/01_avro_producer.py
+
+# 4-4. 변환 결과 검증 (별도 터미널)
+docker exec -it python-app python step4_avro_test/03_verify_json.py
+```
+
+### 변환 파이프라인 구조
+
+```
+Producer (Spring 등)         ksqlDB (SQL 한 줄)           QRadar
+      │                           │                        │
+      │  Avro 직렬화               │  포맷 변환              │  JSON 수집
+      ▼                           ▼                        ▼
+┌──────────────┐  자동 변환  ┌──────────────┐  구독    ┌──────────┐
+│shop.orders   │ ─────────→ │shop.orders   │ ──────→ │ QRadar   │
+│   .avro      │            │   .json      │         │ Consumer │
+│ (바이너리)    │            │ (텍스트)      │         │          │
+└──────────────┘            └──────────────┘         └──────────┘
+```
+
+### 실행 화면
+
+**Control Center - ksqlDB Flow** - `ORDERS_AVRO` (Avro) → `CREATE-STREAM` → `ORDERS_JSON` (JSON) 변환 파이프라인이 시각적으로 표시됩니다. 오른쪽 패널의 SQL이 변환의 전부입니다.
+
+![Avro to JSON Flow](docs/images/avro-to-json-flow.png)
+
+### 핵심: ksqlDB SQL 한 줄로 변환
+
+```sql
+-- Avro 토픽을 JSON 토픽으로 변환하는 것이 이것이 전부입니다
+CREATE STREAM orders_json
+WITH (KAFKA_TOPIC = 'shop.orders.json', VALUE_FORMAT = 'JSON')
+AS SELECT * FROM orders_avro EMIT CHANGES;
+```
+
+기존 Avro 파이프라인에 영향 없이, 변환된 JSON 토픽만 QRadar가 구독하면 됩니다.
+
+### QRadar 모의 테스트 (텍스트 전용 외부 시스템 검증)
+
+QRadar와 동일한 조건(Schema Registry 연동 없는 순수 Kafka Consumer)으로 두 토픽을 읽어서 차이를 검증합니다.
+
+```bash
+docker exec -it python-app python step4_avro_test/04_mock_qradar.py
+```
+
+| 테스트 | 토픽 | Schema Registry | JSON 파싱 | 결과 |
+|--------|------|----------------|-----------|------|
+| TEST 1 | shop.orders.avro | 없음 (QRadar 동일 조건) | 실패 (바이너리) | QRadar 수집 불가 |
+| TEST 2 | shop.orders.json | 없음 (QRadar 동일 조건) | 성공 (텍스트) | QRadar 수집 가능 |
+
+> **참고**: Control Center에서는 Avro 토픽도 JSON처럼 보입니다. 이는 Control Center가 Confluent 자체 제품이라 Schema Registry를 통해 Avro를 자동 역직렬화하기 때문입니다. QRadar 같은 외부 시스템에는 이 기능이 없으므로 JSON 변환이 필요합니다.
+
+### QRadar 설정 예시
+
+```
+Bootstrap Server List: <confluent-broker>:9092
+Consumer Group: qradar-siem-group
+Topic List: shop.orders.json
+```
+
+---
+
 ## 프로젝트 구조
 
 ```
@@ -417,6 +521,11 @@ confluent/
 │   ├── 01_ksqldb_setup.py     #   스트림/테이블 생성
 │   ├── 02_query_ksqldb.py     #   실시간 대시보드
 │   └── ksqldb_queries.sql     #   ksqlDB CLI용 쿼리 모음
+├── step4_avro_test/           # Step 4: Avro → JSON 변환 (QRadar 연동 검증)
+│   ├── 01_avro_producer.py    #   Avro 바이너리로 이벤트 전송
+│   ├── 02_avro_to_json_ksqldb.py  #   ksqlDB로 Avro → JSON 변환
+│   ├── 03_verify_json.py      #   변환 결과 비교 검증
+│   └── 04_mock_qradar.py      #   QRadar 모의 테스트 (텍스트 전용 Consumer)
 └── docs/images/               # 스크린샷
 ```
 
