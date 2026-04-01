@@ -4,7 +4,7 @@ Step 4-2: ksqlDB로 Avro → JSON 변환
 Avro 토픽을 읽어서 JSON 포맷의 새 토픽으로 변환합니다.
 QRadar 같은 텍스트 전용 시스템은 이 JSON 토픽을 구독하면 됩니다.
 
-핵심: SQL 한 줄로 포맷 변환이 가능합니다.
+ksqlDB SQL로 포맷 변환을 수행합니다.
 """
 
 import json
@@ -76,7 +76,7 @@ if __name__ == "__main__":
     # 2. JSON 변환 Stream 생성 (핵심! VALUE_FORMAT='JSON')
     # ──────────────────────────────────────────────
     print("[2] JSON 변환 Stream 생성 (shop.orders.json 토픽)")
-    print("    ★ 이것이 Avro → JSON 변환의 전부입니다 ★")
+    print("    Avro → JSON 포맷 변환")
     print()
     result = ksql_request("""
         CREATE STREAM IF NOT EXISTS orders_json

@@ -29,7 +29,7 @@
 | **Topic** | 메시지가 저장되는 카테고리 | 우편함 |
 | **Partition** | Topic을 분할한 단위 (병렬 처리의 핵심) | 우편함의 칸 |
 | **Schema Registry** | 메시지 형식(스키마)을 중앙 관리 | 편지 양식 관리소 |
-| **Kafka Connect** | 외부 시스템과 코드 없이 데이터 연동 | 자동 우편 배달 시스템 |
+| **Kafka Connect** | 외부 시스템과 Kafka 간 데이터 연동 | 자동 우편 배달 시스템 |
 | **ksqlDB** | SQL로 실시간 스트림 데이터를 처리 | 실시간 편지 분류기 |
 | **Control Center** | 웹 UI로 전체 플랫폼을 모니터링 | 관제 대시보드 |
 
@@ -250,7 +250,7 @@ docker exec -it python-app python step1_basics/04_producer_advanced.py
 
 ## Step 2: 실시간 데이터 파이프라인 (CDC)
 
-> **Kafka Connect**와 **Debezium**으로 PostgreSQL의 변경사항을 코드 없이 Kafka에 실시간 캡처합니다.
+> **Kafka Connect**와 **Debezium**으로 PostgreSQL의 변경사항을 Kafka에 실시간 캡처합니다.
 
 ### CDC (Change Data Capture)란?
 
@@ -312,7 +312,7 @@ docker exec -it python-app python step2_pipeline/03_cdc_consumer.py
 
 | 개념 | 설명 |
 |------|------|
-| **Kafka Connect** | 외부 시스템 ↔ Kafka 간 데이터를 코드 없이 JSON 설정만으로 연동하는 프레임워크 |
+| **Kafka Connect** | 외부 시스템 ↔ Kafka 간 데이터를 JSON 설정으로 연동하는 프레임워크 |
 | **Source Connector** | 외부 → Kafka 방향 (이 실습: PostgreSQL → Kafka) |
 | **Sink Connector** | Kafka → 외부 방향 (예: Kafka → Elasticsearch, S3 등) |
 | **Debezium** | DB의 트랜잭션 로그를 읽어 CDC 이벤트를 생성하는 오픈소스 커넥터 |
@@ -324,11 +324,11 @@ docker exec -it python-app python step2_pipeline/03_cdc_consumer.py
 
 ## Step 3: 스트림 프로세싱 (ksqlDB)
 
-> **SQL만으로** Kafka 토픽의 실시간 데이터를 변환하고 집계합니다.
+> SQL로 Kafka 토픽의 실시간 데이터를 변환하고 집계합니다.
 
 ### ksqlDB란?
 
-Kafka 토픽 위에서 SQL을 실행할 수 있는 스트림 프로세싱 엔진입니다. 별도의 애플리케이션 코드 없이 SQL 쿼리만으로 실시간 데이터 처리가 가능합니다.
+Kafka 토픽 위에서 SQL을 실행할 수 있는 스트림 프로세싱 엔진입니다. SQL 쿼리로 실시간 데이터 처리가 가능합니다.
 
 ### 실행
 
@@ -376,7 +376,7 @@ docker exec -it ksqldb-cli ksql http://ksqldb-server:8088
 - **지역별 주문 현황** (`ORDERS_BY_REGION`): 지역 | 주문 수 | 총 매출. 5초 후 갱신하면 대전 50→52건, 부산 45→46건 등 실시간으로 수치가 증가하는 것을 확인할 수 있습니다.
 - **고가 주문** (`HIGH_VALUE_ORDERS`): ₩500 이상 주문만 자동 필터링. MacBook Pro 3대 주문(₩7,499.97) 등 고액 거래를 실시간으로 감지합니다.
 
-이 대시보드는 **별도의 집계 코드 없이 SQL 쿼리만으로** 만들어졌습니다. 전통적인 배치 집계(시간/일 단위)와 달리, ksqlDB는 이벤트가 도착하는 즉시 집계를 갱신합니다.
+이 대시보드는 ksqlDB의 SQL 쿼리로 구성되었습니다. 배치 집계(시간/일 단위)와 달리, ksqlDB는 이벤트가 도착하는 즉시 집계를 갱신합니다.
 
 **ksqlDB CLI - Push Query** - `EMIT CHANGES`를 붙이면 새 이벤트가 도착할 때마다 결과가 한 줄씩 실시간으로 추가됩니다. Pull Query(1회 조회)와 달리, Push Query는 끊기지 않고 계속 스트리밍됩니다. "실시간 스트림 프로세싱"이 무엇인지 가장 직관적으로 보여주는 기능입니다.
 
@@ -445,7 +445,7 @@ docker exec -it python-app python step4_avro_test/03_verify_json.py
 ### 변환 파이프라인 구조
 
 ```
-Producer (Spring 등)         ksqlDB (SQL 한 줄)           QRadar
+Producer (Spring 등)         ksqlDB (포맷 변환)            QRadar
       │                           │                        │
       │  Avro 직렬화               │  포맷 변환              │  JSON 수집
       ▼                           ▼                        ▼
@@ -458,14 +458,14 @@ Producer (Spring 등)         ksqlDB (SQL 한 줄)           QRadar
 
 ### 실행 화면
 
-**Control Center - ksqlDB Flow** - `ORDERS_AVRO` (Avro) → `CREATE-STREAM` → `ORDERS_JSON` (JSON) 변환 파이프라인이 시각적으로 표시됩니다. 오른쪽 패널의 SQL이 변환의 전부입니다.
+**Control Center - ksqlDB Flow** - `ORDERS_AVRO` (Avro) → `CREATE-STREAM` → `ORDERS_JSON` (JSON) 변환 파이프라인이 시각적으로 표시됩니다. 오른쪽 패널에서 변환에 사용된 SQL을 확인할 수 있습니다.
 
 ![Avro to JSON Flow](docs/images/avro-to-json-flow.png)
 
-### 핵심: ksqlDB SQL 한 줄로 변환
+### ksqlDB 변환 SQL
 
 ```sql
--- Avro 토픽을 JSON 토픽으로 변환하는 것이 이것이 전부입니다
+-- Avro 토픽을 JSON 토픽으로 변환
 CREATE STREAM orders_json
 WITH (KAFKA_TOPIC = 'shop.orders.json', VALUE_FORMAT = 'JSON')
 AS SELECT * FROM orders_avro EMIT CHANGES;
