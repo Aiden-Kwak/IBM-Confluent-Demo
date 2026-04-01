@@ -444,16 +444,35 @@ docker exec -it python-app python step4_avro_test/03_verify_json.py
 
 ### 변환 파이프라인 구조
 
-```
-Producer (Spring 등)         ksqlDB (포맷 변환)            QRadar
-      │                           │                        │
-      │  Avro 직렬화               │  포맷 변환              │  JSON 수집
-      ▼                           ▼                        ▼
-┌──────────────┐  자동 변환  ┌──────────────┐  구독    ┌──────────┐
-│shop.orders   │ ─────────→ │shop.orders   │ ──────→ │ QRadar   │
-│   .avro      │            │   .json      │         │ Consumer │
-│ (바이너리)    │            │ (텍스트)      │         │          │
-└──────────────┘            └──────────────┘         └──────────┘
+```mermaid
+graph LR
+    subgraph Producer["Producer (Spring 등)"]
+        APP["애플리케이션"]
+    end
+
+    subgraph Kafka["Kafka Cluster"]
+        AVRO[/"shop.orders.avro<br/>(Avro 바이너리)"/]
+        JSON[/"shop.orders.json<br/>(JSON 텍스트)"/]
+    end
+
+    subgraph ksqlDB["ksqlDB"]
+        CONVERT["CREATE STREAM<br/>VALUE_FORMAT = 'JSON'"]
+    end
+
+    subgraph External["외부 시스템"]
+        QR["QRadar<br/>(텍스트 전용 Consumer)"]
+    end
+
+    APP -->|Avro 직렬화| AVRO
+    AVRO --> CONVERT
+    CONVERT --> JSON
+    JSON -->|JSON 수집| QR
+
+    AVRO -.->|직접 구독 시<br/>바이너리 → 파싱 불가| QR
+
+    style AVRO fill:#ff6b6b,color:#fff
+    style JSON fill:#51cf66,color:#fff
+    style QR fill:#339af0,color:#fff
 ```
 
 ### 실행 화면
